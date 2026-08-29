@@ -2,28 +2,31 @@ name: Automation
 
 on:
   repository_dispatch:
-    types: [trigger-automation]
+    types: [automation]
   workflow_dispatch:
 
 jobs:
-  heat-record-rdp:
+  automation-runner:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
       - name: Configure Core RDP, Timezone, Display & Audio Redirection
         run: |
-          # 0. Set System Time Zone to Sri Lanka / India (UTC+05:30)
-          Set-TimeZone -Id "Sri Lanka Standard Time"
+          # Set System Time Zone securely via Secret (no hardcoded timezone fallback)
+          $tz = "${{ secrets.RDP_TIMEZONE }}"
+          if (-not [string]::IsNullOrWhiteSpace($tz)) {
+              Set-TimeZone -Id $tz
+          }
 
-          # 1. Enable RDP & Firewall
+          # Enable RDP & Firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-          # 2. Force Remote Desktop active display buffer
+          # Force Remote Desktop active display buffer
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MaxInstanceCount" -Value 100 -Force
           
-          # 3. Enable RDP Audio Redirection in Registry
+          # Enable RDP Audio Redirection in Registry
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableCam" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force
           
@@ -37,20 +40,24 @@ jobs:
           Set-Service -Name "AudioEndpointBuilder" -StartupType Automatic
           Start-Service -Name "AudioEndpointBuilder" -ErrorAction SilentlyContinue
 
-          # 4. Prevent power down or screen timeout
+          # Prevent power down or screen timeout
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change disk-timeout-ac 0
 
-          # 5. Restart TermService
+          # Restart TermService
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User & Security Policies
         run: |
-          $userName = "Cloud PC"
-          $password = "123456"
+          $userName = "${{ secrets.RDP_USER }}"
+          $password = "${{ secrets.RDP_PASSWORD }}"
+
+          if ([string]::IsNullOrWhiteSpace($userName)) { $userName = "Cloud PC" }
+          if ([string]::IsNullOrWhiteSpace($password)) { $password = "123456" }
           
           Write-Host "::add-mask::$password"
+          Write-Host "::add-mask::$userName"
           
           # Disable local password complexity
           secedit /export /cfg "$env:TEMP\secpol.cfg"
@@ -210,23 +217,26 @@ jobs:
 
       - name: Maintain Active Runner Loop & Trigger RDP Bridge
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          RDP_USER: ${{ secrets.RDP_USER }}
+          RDP_PASS: ${{ secrets.RDP_PASSWORD }}
         run: |
+          $user = if ([string]::IsNullOrWhiteSpace($env:RDP_USER)) { "Cloud PC" } else { $env:RDP_USER }
+          $pass = if ([string]::IsNullOrWhiteSpace($env:RDP_PASS)) { "123456" } else { $env:RDP_PASS }
+
           Write-Host "`n======================================================="
           Write-Host "RDP ACCESS READY"
           Write-Host "Address  : $env:TAILSCALE_IP"
-          Write-Host "Username : Cloud PC"
-          Write-Host "Password : [123456]"
+          Write-Host "Username : $user"
+          Write-Host "Password : [PROTECTED]"
           Write-Host "=======================================================\n"
 
-          $pass = "123456"
-
-          # Trigger bridge.yml automatically via repository_dispatch
+          # Trigger bridge.yml using GH_PAT to bypass 403 Forbidden error
           $payload = @{
               event_type = "start-rdp-bridge"
               client_payload = @{
                   ip       = "$env:TAILSCALE_IP"
-                  username = "Cloud PC"
+                  username = "$user"
                   password = "$pass"
               }
           } | ConvertTo-Json -Compress
@@ -234,7 +244,8 @@ jobs:
           Write-Host "Triggering Linux RDP Bridge workflow (bridge.yml)..."
           curl.exe -s -X POST `
             -H "Accept: application/vnd.github+json" `
-            -H "Authorization: Bearer $env:GH_TOKEN" `
+            -H "Authorization: Bearer $env:GH_PAT" `
+            -H "Content-Type: application/json" `
             -H "X-GitHub-Api-Version: 2022-11-28" `
             "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches" `
             -d "$payload"
