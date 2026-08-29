@@ -1,0 +1,81 @@
+name: Bridge
+
+on:
+  repository_dispatch:
+    types: [start-rdp-bridge]
+  workflow_dispatch:
+    inputs:
+      ip:
+        description: 'Target Tailscale IP'
+        required: true
+      username:
+        description: 'Target Windows Username'
+        default: 'Cloud PC'
+        required: true
+      password:
+        description: 'Target Windows Password'
+        default: '123456'
+        required: true
+
+jobs:
+  rdp-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Add Tailscale Repository & Install Dependencies
+        run: |
+          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+          curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
+
+          sudo apt-get update
+          sudo apt-get install -y tailscale xvfb freerdp2-x11 pulseaudio alsa-utils libasound2-plugins
+
+      - name: Authenticate Tailscale
+        run: |
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=linux-rdp-bridge
+
+      - name: Resolve IP & Credentials
+        run: |
+          TARGET_IP="${{ github.event.client_payload.ip || inputs.ip }}"
+          TARGET_USER="${{ github.event.client_payload.username || inputs.username || 'Cloud PC' }}"
+          TARGET_PASS="${{ github.event.client_payload.password || inputs.password || '123456' }}"
+
+          echo "TARGET_IP=$TARGET_IP" >> $GITHUB_ENV
+          echo "TARGET_USER=$TARGET_USER" >> $GITHUB_ENV
+          echo "TARGET_PASS=$TARGET_PASS" >> $GITHUB_ENV
+
+          echo "::add-mask::$TARGET_PASS"
+
+      - name: Run Persistent RDP Session inside XVFB
+        run: |
+          echo "Connecting headless RDP session to $TARGET_IP..."
+
+          Xvfb :99 -screen 0 1920x1080x24 &
+          export DISPLAY=:99
+          sleep 2
+
+          pulseaudio --start --exit-idle-time=-1
+          sleep 1
+
+          xfreerdp /v:"$TARGET_IP" \
+                   /u:"$TARGET_USER" \
+                   /p:"$TARGET_PASS" \
+                   /size:1920x1080 \
+                   /cert-ignore \
+                   /cert:ignore \
+                   /gfx \
+                   /network:auto \
+                   /sound:sys:pulse &
+
+          RDP_PID=$!
+          echo "RDP Client running under PID: $RDP_PID"
+
+          sleep 5
+
+          while kill -0 $RDP_PID 2>/dev/null; do
+            echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
+            sleep 15
+          done
+
+          echo "RDP connection closed or overridden. Terminating action cleanly."
