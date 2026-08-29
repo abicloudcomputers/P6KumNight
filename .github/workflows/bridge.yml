@@ -1,4 +1,4 @@
-name: Bridge
+name: Bridge KeepAlive
 
 on:
   repository_dispatch:
@@ -10,12 +10,10 @@ on:
         required: true
       username:
         description: 'Target Windows Username'
-        default: 'Cloud PC'
-        required: true
+        required: false
       password:
         description: 'Target Windows Password'
-        default: '123456'
-        required: true
+        required: false
 
 jobs:
   rdp-bridge:
@@ -38,14 +36,15 @@ jobs:
       - name: Resolve IP & Credentials
         run: |
           TARGET_IP="${{ github.event.client_payload.ip || inputs.ip }}"
-          TARGET_USER="${{ github.event.client_payload.username || inputs.username || 'Cloud PC' }}"
-          TARGET_PASS="${{ github.event.client_payload.password || inputs.password || '123456' }}"
+          TARGET_USER="${{ github.event.client_payload.username || inputs.username || secrets.RDP_USER || 'Cloud PC' }}"
+          TARGET_PASS="${{ github.event.client_payload.password || inputs.password || secrets.RDP_PASSWORD || '123456' }}"
 
           echo "TARGET_IP=$TARGET_IP" >> $GITHUB_ENV
           echo "TARGET_USER=$TARGET_USER" >> $GITHUB_ENV
           echo "TARGET_PASS=$TARGET_PASS" >> $GITHUB_ENV
 
           echo "::add-mask::$TARGET_PASS"
+          echo "::add-mask::$TARGET_USER"
 
       - name: Run Persistent RDP Session inside XVFB
         run: |
@@ -73,7 +72,7 @@ jobs:
 
           sleep 5
 
-          while kill -0 $RDP_PID 2>/dev/null; do
+          while kill -0 $RDP_PID 2>/devnull; do
             echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
             sleep 15
           done
