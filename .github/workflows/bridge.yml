@@ -1,4 +1,4 @@
-name: Linux RDP Bridge Keep Alive
+name: Linux RDP Bridge KeepAlive
 
 on:
   repository_dispatch:
@@ -57,12 +57,14 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           sleep 1
 
+          # Added robust connection fallback flags for headless xfreerdp
           xfreerdp /v:"$TARGET_IP" \
                    /u:"$TARGET_USER" \
                    /p:"$TARGET_PASS" \
                    /size:1920x1080 \
                    /cert-ignore \
                    /cert:ignore \
+                   +clipboard \
                    /gfx \
                    /network:auto \
                    /sound:sys:pulse &
@@ -72,7 +74,8 @@ jobs:
 
           sleep 5
 
-          while kill -0 $RDP_PID 2>/devnull; do
+          # Fixed redirection syntax error: /dev/null instead of /devnull
+          while kill -0 $RDP_PID 2>/dev/null; do
             echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
             sleep 15
           done
