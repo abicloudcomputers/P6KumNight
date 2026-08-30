@@ -168,21 +168,28 @@ jobs:
           Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
           Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
-          # Find executables
-          $megaDir = Get-ChildItem -Path "$env:LOCALAPPDATA\MEGAcmd", "C:\Program Files\MEGAcmd", "C:\Program Files (x86)\MEGAcmd" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $megaDir) {
-              Write-Error "Could not locate MEGAcmd installation directory."
+          # Search directly for executables across possible install paths
+          $searchPaths = @(
+              "$env:LOCALAPPDATA\MEGAcmd",
+              "C:\Program Files\MEGAcmd",
+              "C:\Program Files (x86)\MEGAcmd"
+          )
+
+          $serverExe = Get-ChildItem -Path $searchPaths -Filter "MEGAcmdServer.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          $loginBat  = Get-ChildItem -Path $searchPaths -Filter "mega-login.bat" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $serverExe -or -not $loginBat) {
+              Write-Error "Could not locate MEGAcmd binaries after installation."
               exit 1
           }
 
-          $serverExe = Join-Path $megaDir.FullName "MEGAcmdServer.exe"
-          $loginBat  = Join-Path $megaDir.FullName "mega-login.bat"
+          Write-Host "Found MEGAcmd at: $($serverExe.DirectoryName)"
 
-          # Start MEGAcmd Server in the background if not already running
+          # Start MEGAcmd Server in background
           Write-Host "Starting MEGAcmdServer..."
-          Start-Process -FilePath $serverExe -WindowStyle Hidden
+          Start-Process -FilePath $serverExe.FullName -WindowStyle Hidden
 
-          # Wait up to 30 seconds for the server to initialize
+          # Wait for server process to start
           $retry = 0
           while ($retry -lt 15) {
               Start-Sleep -Seconds 2
@@ -194,11 +201,11 @@ jobs:
               $retry++
           }
 
-          # Additional pause to allow socket connection readiness
-          Start-Sleep -Seconds 5
+          # Extra pause for IPC socket initialization
+          Start-Sleep -Seconds 8
 
           Write-Host "Logging into MEGA..."
-          & "$loginBat" $env:MEGA_EMAIL $env:MEGA_PASSWORD
+          & "$($loginBat.FullName)" $env:MEGA_EMAIL $env:MEGA_PASSWORD
 
           if ($LASTEXITCODE -ne 0) {
               Write-Error "MEGA login failed with exit code $LASTEXITCODE."
@@ -206,7 +213,7 @@ jobs:
           }
 
           Write-Host "MEGA login completed successfully."
-
+          
       - name: Configure Cloud Directory
         env:
           LOGIN_NAME: ${{ secrets.LOGIN_NAME }}
