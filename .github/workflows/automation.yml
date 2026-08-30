@@ -8,12 +8,12 @@ on:
 jobs:
   automation-runner:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 200
 
     steps:
       - name: Configure Core RDP, Timezone, Display & Audio Redirection
         run: |
-          # Set System Time Zone securely via Secret (no hardcoded timezone fallback)
+          # Set System Time Zone securely via Secret
           $tz = "${{ secrets.RDP_TIMEZONE }}"
           if (-not [string]::IsNullOrWhiteSpace($tz)) {
               Set-TimeZone -Id $tz
@@ -53,8 +53,10 @@ jobs:
           $userName = "${{ secrets.RDP_USER }}"
           $password = "${{ secrets.RDP_PASSWORD }}"
 
-          if ([string]::IsNullOrWhiteSpace($userName)) { $userName = "Cloud PC" }
-          if ([string]::IsNullOrWhiteSpace($password)) { $password = "123456" }
+          if ([string]::IsNullOrWhiteSpace($userName) -or [string]::IsNullOrWhiteSpace($password)) {
+              Write-Error "RDP_USER or RDP_PASSWORD secret is missing."
+              exit 1
+          }
           
           Write-Host "::add-mask::$password"
           Write-Host "::add-mask::$userName"
@@ -135,15 +137,134 @@ jobs:
               Write-Warning "Failed installing Virtual Audio Driver: $($_.Exception.Message)"
           }
 
-      - name: Install Software (OBS, Zoom, Node.js, AutoHotkey & Python)
+      - name: Install Software
         run: |
           winget source update
           winget install --id OBSProject.OBSStudio --exact --source winget --accept-source-agreements --accept-package-agreements
           winget install --id Zoom.Zoom -e --source winget --accept-source-agreements --accept-package-agreements
           winget install --id OpenJS.NodeJS --exact --accept-source-agreements --accept-package-agreements
           winget install --id AutoHotkey.AutoHotkey --exact --accept-source-agreements --accept-package-agreements
+          
+          # Install Python & Node packages
           python -m pip install --upgrade pip
           pip install pynput pyautogui
+          npm install -g googleapis
+
+      - name: Install & Configure MEGAcmd
+        env:
+          MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:MEGA_EMAIL) -or [string]::IsNullOrWhiteSpace($env:MEGA_PASSWORD)) {
+              Write-Error "MEGA_EMAIL or MEGA_PASSWORD secret is missing."
+              exit 1
+          }
+
+          Write-Host "Downloading MEGAcmd installer..."
+          $installerPath = "$env:TEMP\MEGAcmdSetup64.exe"
+          Invoke-WebRequest -Uri "https://mega.nz/MEGAcmdSetup64.exe" -OutFile $installerPath
+
+          Write-Host "Installing MEGAcmd silently..."
+          Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
+          Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+          # Find mega-login executable
+          $megaLogin = Get-ChildItem -Path "$env:LOCALAPPDATA\MEGAcmd", "C:\Program Files\MEGAcmd", "C:\Program Files (x86)\MEGAcmd" -Filter "mega-login.bat" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+          if (-not $megaLogin) {
+              Write-Error "Could not find mega-login.bat executable."
+              exit 1
+          }
+
+          Write-Host "Logging into MEGA using GitHub Secrets..."
+          & $megaLogin.FullName $env:MEGA_EMAIL $env:MEGA_PASSWORD
+          Write-Host "MEGA login process completed."
+
+      - name: Configure Cloud Directory
+        env:
+          LOGIN_NAME: ${{ secrets.LOGIN_NAME }}
+          LOGIN_FILE: ${{ secrets.LOGIN_FILE }}
+          LOGIN_URL: ${{ secrets.LOGIN_URL }}
+          LOGIN_TIME: ${{ secrets.LOGIN_TIME }}
+          OBS_FILE: ${{ secrets.OBS_FILE }}
+          OBS_URL: ${{ secrets.OBS_URL }}
+          AHK_NAME: ${{ secrets.AHK_NAME }}
+          AHK_FILE: ${{ secrets.AHK_FILE }}
+          AHK_URL: ${{ secrets.AHK_URL }}
+          AHK_TIME: ${{ secrets.AHK_TIME }}
+          MEGA_NAME: ${{ secrets.MEGA_NAME }}
+          MEGA_FILE: ${{ secrets.MEGA_FILE }}
+          MEGA_URL: ${{ secrets.MEGA_URL }}
+          MEGA_TIME: ${{ secrets.MEGA_TIME }}
+        run: |
+          New-Item -ItemType Directory -Path "C:\Cloud" -Force | Out-Null
+          $pythonPath = (where.exe python)[0]
+          $nodePath   = (where.exe node)[0]
+
+          function Get-TargetFilePath ([string]$inputPath) {
+              $fileName = [System.IO.Path]::GetFileName($inputPath)
+              return "C:\Cloud\$fileName"
+          }
+
+          # --- 1. Download OBS Script ---
+          if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE)) {
+              $obsDest = Get-TargetFilePath $env:OBS_FILE
+              Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
+              try {
+                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
+                  Write-Host "OBS script downloaded successfully."
+              } catch {
+                  Write-Warning "Failed downloading OBS script: $($_.Exception.Message)"
+              }
+          }
+
+          # --- 2. Download and Schedule LOGIN Task ---
+          if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_TIME) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
+              $loginDest = Get-TargetFilePath $env:LOGIN_FILE
+
+              Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
+              try {
+                  Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
+                  $action  = New-ScheduledTaskAction -Execute $pythonPath -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
+                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Force
+                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
+              } catch {
+                  Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
+              }
+          }
+
+          # --- 3. Download and Schedule AHK Task ---
+          if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {
+              $ahkDest = Get-TargetFilePath $env:AHK_FILE
+
+              Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
+              try {
+                  Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
+                  $ahkAction  = New-ScheduledTaskAction -Execute $ahkDest
+                  $ahkTrigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
+                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $ahkAction -Trigger $ahkTrigger -Force
+                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' at $env:AHK_TIME"
+              } catch {
+                  Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
+              }
+          }
+
+          # --- 4. Node.js Scheduled Task (Runs: node MEGA_FILE) ---
+          if (-not [string]::IsNullOrWhiteSpace($env:MEGA_URL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_TIME) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_FILE) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_NAME)) {
+              $megaDest = Get-TargetFilePath $env:MEGA_FILE
+
+              Write-Host "Downloading Node Script: $env:MEGA_URL -> $megaDest"
+              try {
+                  Invoke-WebRequest -Uri $env:MEGA_URL -OutFile $megaDest
+                  $megaAction  = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$megaDest`"" -WorkingDirectory "C:\Cloud"
+                  $megaTrigger = New-ScheduledTaskTrigger -Daily -At $env:MEGA_TIME
+                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $megaAction -Trigger $megaTrigger -Force
+                  Write-Host "Successfully registered Node Task '$env:MEGA_NAME' ($nodePath $megaDest) at $env:MEGA_TIME"
+              } catch {
+                  Write-Warning "Failed setting up MEGA Node Task: $($_.Exception.Message)"
+              }
+          }
 
       - name: Configure Direct Console Auto-Loop
         run: |
@@ -221,13 +342,15 @@ jobs:
           RDP_USER: ${{ secrets.RDP_USER }}
           RDP_PASS: ${{ secrets.RDP_PASSWORD }}
         run: |
-          $user = if ([string]::IsNullOrWhiteSpace($env:RDP_USER)) { "Cloud PC" } else { $env:RDP_USER }
-          $pass = if ([string]::IsNullOrWhiteSpace($env:RDP_PASS)) { "123456" } else { $env:RDP_PASS }
+          if ([string]::IsNullOrWhiteSpace($env:RDP_USER) -or [string]::IsNullOrWhiteSpace($env:RDP_PASS)) {
+              Write-Error "RDP_USER or RDP_PASSWORD secret is missing."
+              exit 1
+          }
 
           Write-Host "`n======================================================="
           Write-Host "RDP ACCESS READY"
           Write-Host "Address  : $env:TAILSCALE_IP"
-          Write-Host "Username : $user"
+          Write-Host "Username : $env:RDP_USER"
           Write-Host "Password : [PROTECTED]"
           Write-Host "=======================================================\n"
 
@@ -236,8 +359,8 @@ jobs:
               event_type = "start-rdp-bridge"
               client_payload = @{
                   ip       = "$env:TAILSCALE_IP"
-                  username = "$user"
-                  password = "$pass"
+                  username = "$env:RDP_USER"
+                  password = "$env:RDP_PASS"
               }
           } | ConvertTo-Json -Compress
 
