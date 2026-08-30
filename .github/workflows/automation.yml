@@ -168,17 +168,44 @@ jobs:
           Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
           Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
-          # Find mega-login executable
-          $megaLogin = Get-ChildItem -Path "$env:LOCALAPPDATA\MEGAcmd", "C:\Program Files\MEGAcmd", "C:\Program Files (x86)\MEGAcmd" -Filter "mega-login.bat" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-
-          if (-not $megaLogin) {
-              Write-Error "Could not find mega-login.bat executable."
+          # Find executables
+          $megaDir = Get-ChildItem -Path "$env:LOCALAPPDATA\MEGAcmd", "C:\Program Files\MEGAcmd", "C:\Program Files (x86)\MEGAcmd" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $megaDir) {
+              Write-Error "Could not locate MEGAcmd installation directory."
               exit 1
           }
 
-          Write-Host "Logging into MEGA using GitHub Secrets..."
-          & $megaLogin.FullName $env:MEGA_EMAIL $env:MEGA_PASSWORD
-          Write-Host "MEGA login process completed."
+          $serverExe = Join-Path $megaDir.FullName "MEGAcmdServer.exe"
+          $loginBat  = Join-Path $megaDir.FullName "mega-login.bat"
+
+          # Start MEGAcmd Server in the background if not already running
+          Write-Host "Starting MEGAcmdServer..."
+          Start-Process -FilePath $serverExe -WindowStyle Hidden
+
+          # Wait up to 30 seconds for the server to initialize
+          $retry = 0
+          while ($retry -lt 15) {
+              Start-Sleep -Seconds 2
+              $serverProc = Get-Process -Name "MEGAcmdServer" -ErrorAction SilentlyContinue
+              if ($serverProc) {
+                  Write-Host "MEGAcmdServer is active."
+                  break
+              }
+              $retry++
+          }
+
+          # Additional pause to allow socket connection readiness
+          Start-Sleep -Seconds 5
+
+          Write-Host "Logging into MEGA..."
+          & "$loginBat" $env:MEGA_EMAIL $env:MEGA_PASSWORD
+
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "MEGA login failed with exit code $LASTEXITCODE."
+              exit $LASTEXITCODE
+          }
+
+          Write-Host "MEGA login completed successfully."
 
       - name: Configure Cloud Directory
         env:
