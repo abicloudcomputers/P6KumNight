@@ -224,8 +224,10 @@ jobs:
           LOGIN_FILE: ${{ secrets.LOGIN_FILE }}
           LOGIN_URL: ${{ secrets.LOGIN_URL }}
           LOGIN_TIME: ${{ secrets.LOGIN_TIME }}
+          OBS_NAME: ${{ secrets.OBS_NAME }}
           OBS_FILE: ${{ secrets.OBS_FILE }}
           OBS_URL: ${{ secrets.OBS_URL }}
+          OBS_TIME: ${{ secrets.OBS_TIME }}
           AHK_NAME: ${{ secrets.AHK_NAME }}
           AHK_FILE: ${{ secrets.AHK_FILE }}
           AHK_URL: ${{ secrets.AHK_URL }}
@@ -242,15 +244,19 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
-          # --- 1. Download OBS Script ---
-          if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE)) {
+          # --- 1. Download and Schedule OBS Task ---
+          if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
               $obsDest = Get-TargetFilePath $env:OBS_FILE
+
               Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
               try {
                   Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
-                  Write-Host "OBS script downloaded successfully."
+                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
+                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Force
+                  Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
               } catch {
-                  Write-Warning "Failed downloading OBS script: $($_.Exception.Message)"
+                  Write-Warning "Failed setting up OBS Task: $($_.Exception.Message)"
               }
           }
 
