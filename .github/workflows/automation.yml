@@ -16,7 +16,12 @@ jobs:
           # Set System Time Zone securely via Secret
           $tz = "${{ secrets.RDP_TIMEZONE }}"
           if (-not [string]::IsNullOrWhiteSpace($tz)) {
-              Set-TimeZone -Id $tz
+              try {
+                  Set-TimeZone -Id $tz -ErrorAction Stop
+                  Write-Host "Timezone set to $tz"
+              } catch {
+                  Write-Warning "Failed to set timezone '$tz': $($_.Exception.Message)"
+              }
           }
 
           # Edge AutoLaunch Protocol Policy for Zoom
@@ -80,6 +85,12 @@ jobs:
           
           Add-LocalGroupMember -Group "Administrators" -Member $userName -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
+
+          # Configure AutoLogon so GUI tasks can render
+          $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+          Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1" -Force
+          Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $userName -Force
+          Set-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -Value $password -Force
 
           # Infinite session duration & disable lock screen
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization'
@@ -236,6 +247,7 @@ jobs:
           MEGA_FILE: ${{ secrets.MEGA_FILE }}
           MEGA_URL: ${{ secrets.MEGA_URL }}
           MEGA_TIME: ${{ secrets.MEGA_TIME }}
+          RDP_USER: ${{ secrets.RDP_USER }}
         run: |
           New-Item -ItemType Directory -Path "C:\Cloud" -Force | Out-Null
 
@@ -244,68 +256,61 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
+          # Helper function to register interactive tasks under RDP_USER principal
+          function Register-InteractiveScheduledTask {
+              param (
+                  [string]$TaskName,
+                  [string]$Execute,
+                  [string]$Argument,
+                  [string]$TimeStr
+              )
+
+              try {
+                  $action = New-ScheduledTaskAction -Execute $Execute -Argument $Argument -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $TimeStr
+                  $principal = New-ScheduledTaskPrincipal -UserId $env:RDP_USER -LogonType Interactive -RunLevel Highest
+
+                  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+
+                  # Output registration diagnostics
+                  $info = Get-ScheduledTask -TaskName $TaskName | Get-ScheduledTaskInfo
+                  Write-Host "Successfully registered '$TaskName' to run at $TimeStr."
+                  Write-Host "   -> Next Run Time: $($info.NextRunTime)"
+              } catch {
+                  Write-Warning "Failed setting up Task '$TaskName': $($_.Exception.Message)"
+              }
+          }
+
           # --- 1. Download and Schedule OBS Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
               $obsDest = Get-TargetFilePath $env:OBS_FILE
-
               Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
-              try {
-                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
-                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Force
-                  Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
-              } catch {
-                  Write-Warning "Failed setting up OBS Task: $($_.Exception.Message)"
-              }
+              Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
+              Register-InteractiveScheduledTask -TaskName $env:OBS_NAME -Execute "python" -Argument "`"$obsDest`"" -TimeStr $env:OBS_TIME
           }
 
           # --- 2. Download and Schedule LOGIN Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_TIME) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
               $loginDest = Get-TargetFilePath $env:LOGIN_FILE
-
               Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
-              try {
-                  Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
-                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Force
-                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
-              } catch {
-                  Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
-              }
+              Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
+              Register-InteractiveScheduledTask -TaskName $env:LOGIN_NAME -Execute "python" -Argument "`"$loginDest`"" -TimeStr $env:LOGIN_TIME
           }
 
           # --- 3. Download and Schedule AHK Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {
               $ahkDest = Get-TargetFilePath $env:AHK_FILE
-
               Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
-              try {
-                  Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
-                  $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
-                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Force
-                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
-              } catch {
-                  Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
-              }
+              Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
+              Register-InteractiveScheduledTask -TaskName $env:AHK_NAME -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -TimeStr $env:AHK_TIME
           }
 
           # --- 4. Node.js Scheduled Task (MEGA) ---
           if (-not [string]::IsNullOrWhiteSpace($env:MEGA_URL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_TIME) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_FILE) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_NAME)) {
               $megaDest = Get-TargetFilePath $env:MEGA_FILE
-
               Write-Host "Downloading Node Script: $env:MEGA_URL -> $megaDest"
-              try {
-                  Invoke-WebRequest -Uri $env:MEGA_URL -OutFile $megaDest
-                  $action  = New-ScheduledTaskAction -Execute "node" -Argument "`"$megaDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:MEGA_TIME
-                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $action -Trigger $trigger -Force
-                  Write-Host "Successfully registered Node Task '$env:MEGA_NAME' ($megaDest) at $env:MEGA_TIME"
-              } catch {
-                  Write-Warning "Failed setting up MEGA Node Task: $($_.Exception.Message)"
-              }
+              Invoke-WebRequest -Uri $env:MEGA_URL -OutFile $megaDest
+              Register-InteractiveScheduledTask -TaskName $env:MEGA_NAME -Execute "node" -Argument "`"$megaDest`"" -TimeStr $env:MEGA_TIME
           }
 
       - name: Configure Direct Console Auto-Loop
