@@ -8,16 +8,20 @@ on:
 jobs:
   automation-runner:
     runs-on: windows-latest
-    timeout-minutes: 200
+    timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP, Timezone, Display & Audio Redirection
+      - name: Configure Core RDP, Timezone, Display, Audio & Edge Protocols
         run: |
           # Set System Time Zone securely via Secret
           $tz = "${{ secrets.RDP_TIMEZONE }}"
           if (-not [string]::IsNullOrWhiteSpace($tz)) {
               Set-TimeZone -Id $tz
           }
+
+          # Edge AutoLaunch Protocol Policy for Zoom
+          New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Force | Out-Null
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name 'AutoLaunchProtocolsFromOrigins' -Type String -Value '[{"allowed_origins":["https://us06web.zoom.us"],"protocol":"zoommtg"}]' -Force
 
           # Enable RDP & Firewall
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
@@ -137,7 +141,7 @@ jobs:
               Write-Warning "Failed installing Virtual Audio Driver: $($_.Exception.Message)"
           }
 
-      - name: Install Software
+      - name: Install Software (OBS, Zoom, Node.js, AutoHotkey, Python & googleapis)
         run: |
           winget source update
           winget install --id OBSProject.OBSStudio --exact --source winget --accept-source-agreements --accept-package-agreements
@@ -213,8 +217,8 @@ jobs:
           }
 
           Write-Host "MEGA login completed successfully."
-          
-      - name: Configure Cloud Directory
+
+      - name: Configure Cloud Directory & Auto Tasks
         env:
           LOGIN_NAME: ${{ secrets.LOGIN_NAME }}
           LOGIN_FILE: ${{ secrets.LOGIN_FILE }}
@@ -232,8 +236,6 @@ jobs:
           MEGA_TIME: ${{ secrets.MEGA_TIME }}
         run: |
           New-Item -ItemType Directory -Path "C:\Cloud" -Force | Out-Null
-          $pythonPath = (where.exe python)[0]
-          $nodePath   = (where.exe node)[0]
 
           function Get-TargetFilePath ([string]$inputPath) {
               $fileName = [System.IO.Path]::GetFileName($inputPath)
@@ -259,7 +261,7 @@ jobs:
               Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
               try {
                   Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
-                  $action  = New-ScheduledTaskAction -Execute $pythonPath -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
+                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
                   Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Force
                   Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
@@ -275,26 +277,26 @@ jobs:
               Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
               try {
                   Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
-                  $ahkAction  = New-ScheduledTaskAction -Execute $ahkDest
-                  $ahkTrigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
-                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $ahkAction -Trigger $ahkTrigger -Force
-                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' at $env:AHK_TIME"
+                  $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
+                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Force
+                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
               } catch {
                   Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
               }
           }
 
-          # --- 4. Node.js Scheduled Task (Runs: node MEGA_FILE) ---
+          # --- 4. Node.js Scheduled Task (MEGA) ---
           if (-not [string]::IsNullOrWhiteSpace($env:MEGA_URL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_TIME) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_FILE) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_NAME)) {
               $megaDest = Get-TargetFilePath $env:MEGA_FILE
 
               Write-Host "Downloading Node Script: $env:MEGA_URL -> $megaDest"
               try {
                   Invoke-WebRequest -Uri $env:MEGA_URL -OutFile $megaDest
-                  $megaAction  = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$megaDest`"" -WorkingDirectory "C:\Cloud"
-                  $megaTrigger = New-ScheduledTaskTrigger -Daily -At $env:MEGA_TIME
-                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $megaAction -Trigger $megaTrigger -Force
-                  Write-Host "Successfully registered Node Task '$env:MEGA_NAME' ($nodePath $megaDest) at $env:MEGA_TIME"
+                  $action  = New-ScheduledTaskAction -Execute "node" -Argument "`"$megaDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:MEGA_TIME
+                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $action -Trigger $trigger -Force
+                  Write-Host "Successfully registered Node Task '$env:MEGA_NAME' ($megaDest) at $env:MEGA_TIME"
               } catch {
                   Write-Warning "Failed setting up MEGA Node Task: $($_.Exception.Message)"
               }
