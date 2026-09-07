@@ -84,7 +84,7 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
 
           # Infinite session duration & disable lock screen
-          $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization'
+          $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsPersonalization'
           if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
           Set-ItemProperty -Path $policyPath -Name "NoLockScreen" -Value 1 -Type DWord -Force
 
@@ -176,6 +176,7 @@ jobs:
           MEGA_TIME: ${{ secrets.MEGA_TIME }}
           MEGA_EMAIL: ${{ secrets.MEGA_EMAIL }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+          RDP_USER: ${{ secrets.RDP_USER }}
         run: |
           New-Item -ItemType Directory -Path "C:\Cloud" -Force | Out-Null
 
@@ -184,7 +185,10 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
-          # --- 0. Schedule MEGAcmd Setup Task (Runs on Startup / PC Boot) ---
+          # Global Settings: allow running on battery, don't stop, and run as soon as possible if missed
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12)
+
+          # --- 0. Schedule MEGAcmd Setup Task (Runs at Logon) ---
           if (-not [string]::IsNullOrWhiteSpace($env:MEGA_EMAIL) -and -not [string]::IsNullOrWhiteSpace($env:MEGA_PASSWORD)) {
               $megaSetupScript = @"
           Invoke-WebRequest -Uri "https://mega.nz/MEGAcmdSetup64.exe" -OutFile "`$env:TEMP\MEGAcmdSetup64.exe"
@@ -199,9 +203,11 @@ jobs:
 
               $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$megaSetupScriptPath`""
               $trigger = New-ScheduledTaskTrigger -AtLogOn
-              Register-ScheduledTask -TaskName "InstallAndLoginMEGAcmd" -Action $action -Trigger $trigger -Force
+              $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+
+              Register-ScheduledTask -TaskName "InstallAndLoginMEGAcmd" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
               Start-ScheduledTask -TaskName "InstallAndLoginMEGAcmd" -ErrorAction SilentlyContinue
-              Write-Host "Successfully registered MEGAcmd Setup task at login."
+              Write-Host "Successfully registered MEGAcmd Setup task at logon."
           }
 
           # --- 1. Download and Schedule OBS Task ---
@@ -213,7 +219,8 @@ jobs:
                   Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
-                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Force
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
               } catch {
                   Write-Warning "Failed setting up OBS Task: $($_.Exception.Message)"
@@ -229,7 +236,8 @@ jobs:
                   Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
-                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Force
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
               } catch {
                   Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
@@ -245,7 +253,8 @@ jobs:
                   Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
                   $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
-                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Force
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
               } catch {
                   Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
@@ -261,7 +270,8 @@ jobs:
                   Invoke-WebRequest -Uri $env:MEGA_URL -OutFile $megaDest
                   $action  = New-ScheduledTaskAction -Execute "node" -Argument "`"$megaDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:MEGA_TIME
-                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $action -Trigger $trigger -Force
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:MEGA_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered Node Task '$env:MEGA_NAME' ($megaDest) at $env:MEGA_TIME"
               } catch {
                   Write-Warning "Failed setting up MEGA Node Task: $($_.Exception.Message)"
