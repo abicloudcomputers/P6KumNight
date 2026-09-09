@@ -54,7 +54,7 @@ jobs:
           # Restart TermService
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User & Security Policies
+      - name: Create RDP User & Configure AutoLogon
         run: |
           $userName = "${{ secrets.RDP_USER }}"
           $password = "${{ secrets.RDP_PASSWORD }}"
@@ -82,6 +82,11 @@ jobs:
           
           Add-LocalGroupMember -Group "Administrators" -Member $userName -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
+
+          # Enable AutoLogon to establish interactive Session 1 automatically
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name "AutoAdminLogon" -Value "1" -Force
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name "DefaultUserName" -Value "$userName" -Force
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name "DefaultPassword" -Value "$password" -Force
 
           # Infinite session duration & disable lock screen
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsPersonalization'
@@ -124,7 +129,7 @@ jobs:
               }
           }
 
-          # --- 2. Silent Non-Blocking Virtual Audio Driver ---
+          # --- 2. Silent Virtual Audio Driver ---
           try {
               $audioZip = "$env:TEMP\VBCABLE.zip"
               $audioDir = "C:\VirtualAudio"
@@ -137,7 +142,7 @@ jobs:
               $infPath = Join-Path $audioDir "vbcable_x64.inf"
               if (Test-Path $infPath) {
                   pnputil.exe /add-driver "$infPath" /install
-                  Write-Host "Virtual Audio Driver installed via pnputil without hanging."
+                  Write-Host "Virtual Audio Driver installed via pnputil."
               }
           } catch {
               Write-Warning "Failed installing Virtual Audio Driver: $($_.Exception.Message)"
@@ -181,7 +186,6 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
-          # Global Settings: allow running on battery, don't stop, and run as soon as possible if missed
           $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12)
 
           # --- 1. Download and Schedule OBS Task ---
@@ -193,7 +197,7 @@ jobs:
                   Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
-                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType InteractiveToken -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
               } catch {
@@ -210,7 +214,7 @@ jobs:
                   Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
-                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType InteractiveToken -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
               } catch {
@@ -227,7 +231,7 @@ jobs:
                   Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
                   $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
-                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType InteractiveToken -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
               } catch {
@@ -244,7 +248,7 @@ jobs:
                   Invoke-WebRequest -Uri $env:UPLOAD_URL -OutFile $uploadDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:UPLOAD_TIME
-                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType InteractiveToken -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
                   Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at $env:UPLOAD_TIME"
               } catch {
@@ -340,7 +344,6 @@ jobs:
           Write-Host "Password : [PROTECTED]"
           Write-Host "=======================================================\n"
 
-          # Trigger bridge.yml using GH_PAT to bypass 403 Forbidden error
           $payload = @{
               event_type = "start-rdp-bridge"
               client_payload = @{
@@ -359,7 +362,6 @@ jobs:
             "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches" `
             -d "$payload"
 
-          # Run loop for 3 hours (10800 seconds), then complete cleanly
           $totalSeconds = 10800
           $elapsedSeconds = 0
 
