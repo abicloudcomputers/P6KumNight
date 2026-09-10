@@ -46,12 +46,13 @@ jobs:
           echo "::add-mask::$TARGET_PASS"
           echo "::add-mask::$TARGET_USER"
 
-      - name: Run Persistent RDP Session inside XVFB
+      - name: Run Single RDP Session inside XVFB
         run: |
-          echo "Connecting persistent headless RDP session to $TARGET_IP..."
+          echo "Connecting headless RDP session to $TARGET_IP..."
 
           # Initialize Virtual Display Buffer
           Xvfb :99 -screen 0 1920x1080x24 &
+          XVFB_PID=$!
           export DISPLAY=:99
           sleep 2
 
@@ -59,34 +60,36 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           sleep 1
 
-          # Background Keep-Alive Task: Simulates key presses inside XVFB to keep display active
+          # Background Keep-Alive Task
           (
             while true; do
               sleep 10
               xdotool key Shift_L 2>/dev/null || true
             done
           ) &
+          KEEP_ALIVE_PID=$!
 
-          # Continuous Connection Loop: Re-establishes session if kicked off by real PC
-          while true; do
-            echo "[$(date)] Launching Real PC Emulated RDP Session to $TARGET_IP..."
+          echo "[$(date)] Starting RDP Session to $TARGET_IP..."
 
-            xfreerdp /v:"$TARGET_IP" \
-                     /u:"$TARGET_USER" \
-                     /p:"$TARGET_PASS" \
-                     /size:1920x1080 \
-                     /bpp:32 \
-                     /gdi:hw \
-                     /rfx \
-                     /admin \
-                     /cert-ignore \
-                     /cert:ignore \
-                     +clipboard \
-                     /network:LAN \
-                     /sound:sys:pulse \
-                     /auto-reconnect \
-                     /auto-reconnect-max-retries:0
+          # Runs xfreerdp directly. Once disconnected, the script continues immediately.
+          xfreerdp /v:"$TARGET_IP" \
+                   /u:"$TARGET_USER" \
+                   /p:"$TARGET_PASS" \
+                   /size:1920x1080 \
+                   /bpp:32 \
+                   /gdi:hw \
+                   /rfx \
+                   /admin \
+                   /cert-ignore \
+                   /cert:ignore \
+                   +clipboard \
+                   /network:LAN \
+                   /sound:sys:pulse || true
 
-            echo "[$(date)] RDP disconnected (e.g. real PC connected). Re-attaching to keep GUI alive in 5 seconds..."
-            sleep 5
-          done
+          echo "[$(date)] RDP Session disconnected. Cleaning up processes and finishing job..."
+
+          # Clean up background tasks
+          kill $KEEP_ALIVE_PID 2>/dev/null || true
+          kill $XVFB_PID 2>/dev/null || true
+
+          exit 0
