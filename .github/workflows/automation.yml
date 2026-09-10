@@ -340,9 +340,15 @@ jobs:
           Write-Host "Password : [PROTECTED]"
           Write-Host "=======================================================\n"
 
-          # Trigger bridge.yml using GH_PAT to bypass 403 Forbidden error
-          $payload = @{
-              event_type = "start-rdp-bridge"
+          # Trigger bridge.yml using native PowerShell Invoke-RestMethod
+          $headers = @{
+              "Accept"                = "application/vnd.github+json"
+              "Authorization"         = "Bearer $env:GH_PAT"
+              "X-GitHub-Api-Version" = "2022-11-28"
+          }
+
+          $body = @{
+              event_type     = "start-rdp-bridge"
               client_payload = @{
                   ip       = "$env:TAILSCALE_IP"
                   username = "$env:RDP_USER"
@@ -351,14 +357,13 @@ jobs:
           } | ConvertTo-Json -Compress
 
           Write-Host "Triggering Linux RDP Bridge workflow (bridge.yml)..."
-          curl.exe -s -X POST `
-            -H "Accept: application/vnd.github+json" `
-            -H "Authorization: Bearer $env:GH_PAT" `
-
-            -H "Content-Type: application/json" `
-            -H "X-GitHub-Api-Version: 2022-11-28" `
-            "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches" `
-            -d "$payload"
+          try {
+              $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches"
+              Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+              Write-Host "Successfully dispatched repository_dispatch event to bridge.yml"
+          } catch {
+              Write-Warning "Failed to trigger dispatch event: $($_.Exception.Message)"
+          }
 
           # Run loop for 3 hours (10800 seconds), then complete cleanly
           $totalSeconds = 10800
