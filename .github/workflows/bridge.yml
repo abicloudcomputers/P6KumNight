@@ -27,7 +27,7 @@ jobs:
           curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
 
           sudo apt-get update
-          sudo apt-get install -y tailscale xvfb freerdp2-x11 pulseaudio alsa-utils libasound2-plugins
+          sudo apt-get install -y tailscale xvfb freerdp2-x11 pulseaudio alsa-utils libasound2-plugins xdotool
 
       - name: Authenticate Tailscale
         run: |
@@ -48,37 +48,45 @@ jobs:
 
       - name: Run Persistent RDP Session inside XVFB
         run: |
-          echo "Connecting headless RDP session to $TARGET_IP..."
+          echo "Connecting persistent headless RDP session to $TARGET_IP..."
 
+          # Initialize Virtual Display Buffer
           Xvfb :99 -screen 0 1920x1080x24 &
           export DISPLAY=:99
           sleep 2
 
+          # Initialize Audio Subsystem
           pulseaudio --start --exit-idle-time=-1
           sleep 1
 
-          # Added /admin flag to attach directly to active console session without forced logoff
-          xfreerdp /v:"$TARGET_IP" \
-                   /u:"$TARGET_USER" \
-                   /p:"$TARGET_PASS" \
-                   /admin \
-                   /size:1920x1080 \
-                   /cert-ignore \
-                   /cert:ignore \
-                   +clipboard \
-                   /gfx \
-                   /network:auto \
-                   /sound:sys:pulse &
+          # Background Keep-Alive Task: Simulates key presses inside XVFB to keep display active
+          (
+            while true; do
+              sleep 10
+              xdotool key Shift_L 2>/dev/null || true
+            done
+          ) &
 
-          RDP_PID=$!
-          echo "RDP Client running under PID: $RDP_PID"
+          # Continuous Connection Loop: Re-establishes session if kicked off by real PC
+          while true; do
+            echo "[$(date)] Launching Real PC Emulated RDP Session to $TARGET_IP..."
 
-          sleep 5
+            xfreerdp /v:"$TARGET_IP" \
+                     /u:"$TARGET_USER" \
+                     /p:"$TARGET_PASS" \
+                     /size:1920x1080 \
+                     /bpp:32 \
+                     /gdi:hw \
+                     /rfx \
+                     /admin \
+                     /cert-ignore \
+                     /cert:ignore \
+                     +clipboard \
+                     /network:LAN \
+                     /sound:sys:pulse \
+                     /auto-reconnect \
+                     /auto-reconnect-max-retries:0
 
-          while kill -0 $RDP_PID 2>/dev/null; do
-            echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
-            sleep 15
+            echo "[$(date)] RDP disconnected (e.g. real PC connected). Re-attaching to keep GUI alive in 5 seconds..."
+            sleep 5
           done
-
-          echo "RDP Client exited unexpectedly. Exiting."
-          exit 1
