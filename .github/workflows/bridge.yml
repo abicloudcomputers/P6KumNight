@@ -27,31 +27,17 @@ jobs:
           curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
 
           sudo apt-get update
-          sudo apt-get install -y tailscale xvfb freerdp2-x11 pulseaudio alsa-utils libasound2-plugins dbus-x11
+          sudo apt-get install -y tailscale xvfb freerdp2-x11 pulseaudio alsa-utils libasound2-plugins
 
-      - name: Authenticate Tailscale & Wait for Network
+      - name: Authenticate Tailscale
         run: |
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=linux-rdp-bridge
-          
-          # Wait up to 30s for Tailscale network interface to fully establish
-          for i in {1..10}; do
-            if sudo tailscale status | grep -q "linux-rdp-bridge"; then
-              echo "Tailscale active and operational."
-              break
-            fi
-            sleep 3
-          done
 
       - name: Resolve IP & Credentials
         run: |
           TARGET_IP="${{ github.event.client_payload.ip || inputs.ip }}"
           TARGET_USER="${{ github.event.client_payload.username || inputs.username || secrets.RDP_USER || 'Cloud PC' }}"
           TARGET_PASS="${{ github.event.client_payload.password || inputs.password || secrets.RDP_PASSWORD || '123456' }}"
-
-          if [ -z "$TARGET_IP" ]; then
-            echo "::error::Target IP is empty! Exiting."
-            exit 1
-          fi
 
           echo "TARGET_IP=$TARGET_IP" >> $GITHUB_ENV
           echo "TARGET_USER=$TARGET_USER" >> $GITHUB_ENV
@@ -64,42 +50,35 @@ jobs:
         run: |
           echo "Connecting headless RDP session to $TARGET_IP..."
 
-          # Start Virtual Framebuffer
           Xvfb :99 -screen 0 1920x1080x24 &
           export DISPLAY=:99
           sleep 2
 
-          # Start PulseAudio with virtual dummy sink for headless audio routing
-          pulseaudio --start --exit-idle-time=-1 || true
-          pactl load-module module-null-sink sink_name=dummy || true
+          pulseaudio --start --exit-idle-time=-1
           sleep 1
 
-          # Auto-reconnect loop: keep FreeRDP alive even if network drops temporarily
-          while true; do
-            echo "[$(date)] Starting xfreerdp connection to $TARGET_IP..."
-            
-            xfreerdp /v:"$TARGET_IP" \
-                     /u:"$TARGET_USER" \
-                     /p:"$TARGET_PASS" \
-                     /size:1920x1080 \
-                     /cert-ignore \
-                     +clipboard \
-                     /gfx:rfx \
-                     /network:auto \
-                     /sound:sys:pulse \
-                     /sec:nla &
+          # Added /admin flag to attach directly to active console session without forced logoff
+          xfreerdp /v:"$TARGET_IP" \
+                   /u:"$TARGET_USER" \
+                   /p:"$TARGET_PASS" \
+                   /admin \
+                   /size:1920x1080 \
+                   /cert-ignore \
+                   /cert:ignore \
+                   +clipboard \
+                   /gfx \
+                   /network:auto \
+                   /sound:sys:pulse &
 
-            RDP_PID=$!
-            echo "RDP Client running under PID: $RDP_PID"
+          RDP_PID=$!
+          echo "RDP Client running under PID: $RDP_PID"
 
-            sleep 5
+          sleep 5
 
-            # Monitor active session
-            while kill -0 $RDP_PID 2>/dev/null; do
-              echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
-              sleep 15
-            done
-
-            echo "[$(date)] RDP disconnected or process exited. Retrying connection in 5 seconds..."
-            sleep 5
+          while kill -0 $RDP_PID 2>/dev/null; do
+            echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..."
+            sleep 15
           done
+
+          echo "RDP Client exited unexpectedly. Exiting."
+          exit 1
