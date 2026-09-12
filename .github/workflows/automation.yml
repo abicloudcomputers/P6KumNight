@@ -30,6 +30,13 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
           Set-ItemProperty -Path "HKCU:\Control Panel\Accessibility\StickyKeys" -Name "Flags" -Value "506"
+          $path = "HKCU:\Control Panel\Accessibility\StickyKeys"
+          New-Item -Path $path -Force | Out-Null
+          Set-ItemProperty -Path $path -Name "Flags" -Value "58" -Type String
+          $path2 = "HKCU:\Control Panel\Accessibility\Keyboard Response"
+          New-Item -Path $path2 -Force | Out-Null
+          Set-ItemProperty -Path $path2 -Name "Flags" -Value "122" -Type String
+
 
           # Force Remote Desktop active display buffer
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MaxInstanceCount" -Value 100 -Force
