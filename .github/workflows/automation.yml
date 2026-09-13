@@ -258,10 +258,20 @@ jobs:
               }
           }
 
-      - name: Configure Direct Console Auto-Loop
+      - name: Configure Direct Console Auto-Loop & Prevent Lock
         run: |
           $scriptContent = @'
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class MouseMover {
+              [DllImport("user32.dll")]
+              public static extern bool SetCursorPos(int X, int Y);
+          }
+          "@
+
           while ($true) {
+              # Keep active session mapped to console
               $output = qwinsta
               foreach ($line in $output) {
                   if ($line -match "disc\s+(\d+)") {
@@ -271,7 +281,9 @@ jobs:
                       }
                   }
               }
-              Start-Sleep -Seconds 5
+              # Prevent idle lock by gently nudging the cursor 1 pixel and back
+              [MouseMover]::SetCursorPos(500, 500)
+              Start-Sleep -Seconds 30
           }
           '@
 
