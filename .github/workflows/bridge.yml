@@ -1,4 +1,4 @@
-name: Linux RDP
+name: Linux RDP Bridge KeepAlive
 
 on:
   repository_dispatch:
@@ -18,15 +18,9 @@ on:
 jobs:
   rdp-bridge:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 3600
 
     steps:
-      - name: Disable Sleep and Update Grub
-        run: |
-          sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
-          sudo sed -i 's/quiet splash/quiet/' /etc/default/grub || true
-          sudo update-grub || true
-
       - name: Add Tailscale Repository & Install Dependencies
         run: |
           curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
@@ -54,14 +48,19 @@ jobs:
 
       - name: Run Single RDP Session inside XVFB
         run: |
+          echo "Connecting headless RDP session to $TARGET_IP..."
+
+          # Initialize Virtual Display Buffer
           Xvfb :99 -screen 0 1920x1080x24 &
           XVFB_PID=$!
           export DISPLAY=:99
           sleep 2
 
+          # Initialize Audio Subsystem
           pulseaudio --start --exit-idle-time=-1
           sleep 1
 
+          # Background Keep-Alive Task
           (
             while true; do
               sleep 10
@@ -70,6 +69,9 @@ jobs:
           ) &
           KEEP_ALIVE_PID=$!
 
+          echo "[$(date)] Starting RDP Session to $TARGET_IP..."
+
+          # Runs xfreerdp directly. Once disconnected, the script continues immediately.
           xfreerdp /v:"$TARGET_IP" \
                    /u:"$TARGET_USER" \
                    /p:"$TARGET_PASS" \
@@ -84,6 +86,9 @@ jobs:
                    /network:LAN \
                    /sound:sys:pulse || true
 
+          echo "[$(date)] RDP Session disconnected. Cleaning up processes and finishing job..."
+
+          # Clean up background tasks
           kill $KEEP_ALIVE_PID 2>/dev/null || true
           kill $XVFB_PID 2>/dev/null || true
 
