@@ -100,9 +100,8 @@ jobs:
           Set-ItemProperty -Path $tsPath -Name "fResetIdleTimeout" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $tsPath -Name "fKillAppOnLogoff" -Value 0 -Type DWord -Force
 
-      - name: Install Virtual Display & Virtual Audio Driver
+      - name: Install Virtual Display Driver
         run: |
-          # --- 1. Install Virtual Display Driver ---
           $driverZip = "$env:TEMP\usbmmidd.zip"
           $driverDir = "C:\VirtualDisplay"
           New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
@@ -127,26 +126,8 @@ jobs:
                   Set-Location $installer.DirectoryName
                   & .\deviceinstaller64.exe install usbmmidd.inf usbmmidd
                   & .\deviceinstaller64.exe enableidd 1
+                  Write-Host "Virtual Display Driver installed and enabled successfully."
               }
-          }
-
-          # --- 2. Silent Non-Blocking Virtual Audio Driver ---
-          try {
-              $audioZip = "$env:TEMP\VBCABLE.zip"
-              $audioDir = "C:\VirtualAudio"
-              New-Item -ItemType Directory -Path $audioDir -Force | Out-Null
-
-              $audioUrl = "https://download.vb-audio.com/Download_ZIP/VBCABLE_Driver_Pack43.zip"
-              curl.exe -sSL "$audioUrl" -o "$audioZip"
-              Expand-Archive -Path $audioZip -DestinationPath $audioDir -Force
-
-              $infPath = Join-Path $audioDir "vbcable_x64.inf"
-              if (Test-Path $infPath) {
-                  pnputil.exe /add-driver "$infPath" /install
-                  Write-Host "Virtual Audio Driver installed via pnputil without hanging."
-              }
-          } catch {
-              Write-Warning "Failed installing Virtual Audio Driver: $($_.Exception.Message)"
           }
 
       - name: Install Software (OBS, Zoom, AutoHotkey & Python Packages)
@@ -187,103 +168,80 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
-          # Global Settings: allow running on battery, don't stop, and run as soon as possible if missed
           $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12)
 
-          # --- 1. Download and Schedule OBS Task ---
+          # --- 1. OBS Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
               $obsDest = Get-TargetFilePath $env:OBS_FILE
-
-              Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
               try {
                   Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
-              } catch {
-                  Write-Warning "Failed setting up OBS Task: $($_.Exception.Message)"
-              }
+              } catch {}
           }
 
-          # --- 2. Download and Schedule LOGIN Task ---
+          # --- 2. LOGIN Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_TIME) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
               $loginDest = Get-TargetFilePath $env:LOGIN_FILE
-
-              Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
               try {
                   Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
-              } catch {
-                  Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
-              }
+              } catch {}
           }
 
-          # --- 3. Download and Schedule AHK Task ---
+          # --- 3. AHK Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {
               $ahkDest = Get-TargetFilePath $env:AHK_FILE
-
-              Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
               try {
                   Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
                   $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
-              } catch {
-                  Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
-              }
+              } catch {}
           }
 
-          # --- 4. Download and Schedule UPLOAD Task ---
+          # --- 4. UPLOAD Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:UPLOAD_URL) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_TIME) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_FILE) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_NAME)) {
               $uploadDest = Get-TargetFilePath $env:UPLOAD_FILE
-
-              Write-Host "Downloading Upload Script: $env:UPLOAD_URL -> $uploadDest"
               try {
                   Invoke-WebRequest -Uri $env:UPLOAD_URL -OutFile $uploadDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:UPLOAD_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at $env:UPLOAD_TIME"
-              } catch {
-                  Write-Warning "Failed setting up Upload Task: $($_.Exception.Message)"
-              }
+              } catch {}
           }
 
-      - name: Configure Direct Console Auto-Loop & Prevent Lock
+      - name: Configure Direct Console Auto-Loop & Keep GUI Alive
         run: |
           $scriptContent = @'
           Add-Type -TypeDefinition @"
           using System;
           using System.Runtime.InteropServices;
-          public class MouseMover {
+          public class GUIKeepAlive {
               [DllImport("user32.dll")]
               public static extern bool SetCursorPos(int X, int Y);
           }
           "@
 
           while ($true) {
-              # Keep active session mapped to console
-              $output = qwinsta
+              $output = qwinsta 2>$null
               foreach ($line in $output) {
                   if ($line -match "disc\s+(\d+)") {
                       $sessionId = $matches[1]
-                      if ($sessionId -ne "0") {
-                          cmd.exe /c "tscon $sessionId /dest:console" 2>$null
-                      }
+                      cmd.exe /c "tscon $sessionId /dest:console" 2>$null
                   }
               }
-              # Prevent idle lock by gently nudging the cursor 1 pixel and back
-              [MouseMover]::SetCursorPos(500, 500)
-              Start-Sleep -Seconds 30
+
+              # Nudge cursor subtly so Windows never triggers display sleep or PyAutoGUI freeze
+              [GUIKeepAlive]::SetCursorPos(200, 200)
+              Start-Sleep -Seconds 15
           }
           '@
 
@@ -303,21 +261,14 @@ jobs:
           $installerPath = "$env:TEMP\tailscale.msi"
 
           curl.exe -sSL "$tsUrl" -o "$installerPath"
-
-          $process = Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/qn", "/norestart" -Wait -PassThru
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/qn", "/norestart" -Wait -PassThru
           Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-
           $timeout = 0
           while (-not (Test-Path $tsExe) -and $timeout -lt 30) {
               Start-Sleep -Seconds 2
               $timeout += 2
-          }
-
-          if (-not (Test-Path $tsExe)) {
-              Write-Error "Tailscale executable was not found."
-              exit 1
           }
 
           Get-Service -Name "Tailscale" -ErrorAction SilentlyContinue | Start-Service -ErrorAction SilentlyContinue
@@ -337,7 +288,6 @@ jobs:
               exit 1
           }
 
-          Write-Host "Tailscale IP assigned successfully: $tsIP"
           "TAILSCALE_IP=$tsIP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Maintain Active Runner Loop & Trigger RDP Bridge
@@ -351,14 +301,6 @@ jobs:
               exit 1
           }
 
-          Write-Host "`n======================================================="
-          Write-Host "RDP ACCESS READY"
-          Write-Host "Address  : $env:TAILSCALE_IP"
-          Write-Host "Username : $env:RDP_USER"
-          Write-Host "Password : [PROTECTED]"
-          Write-Host "=======================================================\n"
-
-          # Trigger bridge.yml using native PowerShell Invoke-RestMethod
           $headers = @{
               "Accept"               = "application/vnd.github+json"
               "Authorization"        = "Bearer $env:GH_PAT"
@@ -374,24 +316,17 @@ jobs:
               }
           } | ConvertTo-Json -Compress
 
-          Write-Host "Triggering Linux RDP Bridge workflow (bridge.yml)..."
           try {
               $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches"
               Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
-              Write-Host "Successfully dispatched repository_dispatch event to bridge.yml"
-          } catch {
-              Write-Warning "Failed to trigger dispatch event: $($_.Exception.Message)"
-          }
+          } catch {}
 
-          # Run loop for 3 hours (10800 seconds), then complete cleanly
           $totalSeconds = 10800
           $elapsedSeconds = 0
 
           while ($elapsedSeconds -lt $totalSeconds) {
-              Write-Host "[$(Get-Date)] RDP & Virtual Engine Active ($elapsedSeconds / $totalSeconds seconds)..."
               Start-Sleep -Seconds 300
               $elapsedSeconds += 300
           }
 
-          Write-Host "Completing workflow successfully."
           exit 0
