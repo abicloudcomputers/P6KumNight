@@ -63,8 +63,8 @@ jobs:
           # Background Keep-Alive Task
           (
             while true; do
-              sleep 10
-              xdotool key Shift_L 2>/dev/null || true
+              sleep 60
+              xdotool key F15 2>/dev/null || true
             done
           ) &
           KEEP_ALIVE_PID=$!
