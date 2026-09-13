@@ -46,10 +46,14 @@ jobs:
           Set-Service -Name "AudioEndpointBuilder" -StartupType Automatic
           Start-Service -Name "AudioEndpointBuilder" -ErrorAction SilentlyContinue
 
-          # Prevent power down or screen timeout
-          powercfg /change monitor-timeout-ac 0
+          # Prevent power down, sleep, or screen timeout (AC & DC battery settings)
+          powercfg /setactive scheme_min
+          powercfg /change standby-timeout-dc 0
           powercfg /change standby-timeout-ac 0
-          powercfg /change disk-timeout-ac 0
+          powercfg /change monitor-timeout-dc 0
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change hibernate-timeout-dc 0
+          powercfg /change hibernate-timeout-ac 0
 
           # Restart TermService
           Restart-Service -Name TermService -Force
@@ -83,7 +87,7 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member $userName -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
 
-          # Infinite session duration & disable lock screen
+          # Infinite session duration & disable lock screen completely
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsPersonalization'
           if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
           Set-ItemProperty -Path $policyPath -Name "NoLockScreen" -Value 1 -Type DWord -Force
@@ -93,6 +97,8 @@ jobs:
           Set-ItemProperty -Path $tsPath -Name "MaxIdleTime" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $tsPath -Name "MaxDisconnectionTime" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $tsPath -Name "RemoteAppLogoffTimeout" -Value 0 -Type DWord -Force
+          Set-ItemProperty -Path $tsPath -Name "fResetIdleTimeout" -Value 0 -Type DWord -Force
+          Set-ItemProperty -Path $tsPath -Name "fKillAppOnLogoff" -Value 0 -Type DWord -Force
 
       - name: Install Virtual Display & Virtual Audio Driver
         run: |
@@ -342,8 +348,8 @@ jobs:
 
           # Trigger bridge.yml using native PowerShell Invoke-RestMethod
           $headers = @{
-              "Accept"                = "application/vnd.github+json"
-              "Authorization"         = "Bearer $env:GH_PAT"
+              "Accept"               = "application/vnd.github+json"
+              "Authorization"        = "Bearer $env:GH_PAT"
               "X-GitHub-Api-Version" = "2022-11-28"
           }
 
