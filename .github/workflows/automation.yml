@@ -37,6 +37,7 @@ jobs:
           New-Item -Path $path2 -Force | Out-Null
           Set-ItemProperty -Path $path2 -Name "Flags" -Value "122" -Type String
 
+
           # Force Remote Desktop active display buffer
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MaxInstanceCount" -Value 100 -Force
 
@@ -351,8 +352,8 @@ jobs:
 
           # Trigger bridge.yml using native PowerShell Invoke-RestMethod
           $headers = @{
-              "Accept"               = "application/vnd.github+json"
-              "Authorization"        = "Bearer $env:GH_PAT"
+              "Accept"                = "application/vnd.github+json"
+              "Authorization"         = "Bearer $env:GH_PAT"
               "X-GitHub-Api-Version" = "2022-11-28"
           }
 
@@ -368,16 +369,17 @@ jobs:
           Write-Host "Triggering Linux RDP Bridge workflow (bridge.yml)..."
           try {
               $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches"
-              Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body$body -ContentType "application/json"
+              Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
               Write-Host "Successfully dispatched repository_dispatch event to bridge.yml"
           } catch {
               Write-Warning "Failed to trigger dispatch event: $($_.Exception.Message)"
           }
 
           # Run loop for 3 hours (10800 seconds), then complete cleanly
-          $totalSeconds = 10800$elapsedSeconds = 0
+          $totalSeconds = 10800
+          $elapsedSeconds = 0
 
-          while ($elapsedSeconds -lt$totalSeconds) {
+          while ($elapsedSeconds -lt $totalSeconds) {
               Write-Host "[$(Get-Date)] RDP & Virtual Engine Active ($elapsedSeconds / $totalSeconds seconds)..."
               Start-Sleep -Seconds 300
               $elapsedSeconds += 300
