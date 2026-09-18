@@ -64,7 +64,7 @@ jobs:
           (
             while true; do
               sleep 10
-              xdotool key F15 2>/dev/null || true
+              xdotool key Shift_L 2>/dev/null || true
             done
           ) &
           KEEP_ALIVE_PID=$!
