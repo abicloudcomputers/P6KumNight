@@ -339,16 +339,17 @@ jobs:
           Write-Host "Triggering Linux RDP Bridge workflow (bridge.yml)..."
           try {
               $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/dispatches"
-              Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body$body -ContentType "application/json"
+              Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
               Write-Host "Successfully dispatched repository_dispatch event to bridge.yml"
           } catch {
               Write-Warning "Failed to trigger dispatch event: $($_.Exception.Message)"
           }
 
           # Run loop for 3 hours (10800 seconds), then complete cleanly
-          $totalSeconds = 10800$elapsedSeconds = 0
+          $totalSeconds = 10800
+          $elapsedSeconds = 0
 
-          while ($elapsedSeconds -lt$totalSeconds) {
+          while ($elapsedSeconds -lt $totalSeconds) {
               Write-Host "[$(Get-Date)] RDP & Virtual Engine Active ($elapsedSeconds / $totalSeconds seconds)..."
               Start-Sleep -Seconds 300
               $elapsedSeconds += 300
