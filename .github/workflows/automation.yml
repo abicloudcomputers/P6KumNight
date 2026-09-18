@@ -167,7 +167,6 @@ jobs:
           LOGIN_NAME: ${{ secrets.LOGIN_NAME }}
           LOGIN_FILE: ${{ secrets.LOGIN_FILE }}
           LOGIN_URL: ${{ secrets.LOGIN_URL }}
-          LOGIN_TIME: ${{ secrets.LOGIN_TIME }}
           OBS_NAME: ${{ secrets.OBS_NAME }}
           OBS_FILE: ${{ secrets.OBS_FILE }}
           OBS_URL: ${{ secrets.OBS_URL }}
@@ -192,35 +191,36 @@ jobs:
           # Global Settings: allow running on battery, don't stop, and run as soon as possible if missed
           $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12)
 
+          # Calculate dynamic execution time: Current Time + 1 minute (Format: HH:mm)
+          $dynamicLoginTime = (Get-Date).AddMinutes(1).ToString("HH:mm")
+
           # --- 1. Download and Schedule OBS Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
-              $obsDest = Get-TargetFilePath $env:OBS_FILE
+              $obsDest = Get-TargetFilePath$env:OBS_FILE
 
-              Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
+              Write-Host "Downloading OBS Script: $env:OBS_URL ->$obsDest"
               try {
-                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
+                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest$action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At$env:OBS_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
-                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at $env:OBS_TIME"
+                  Register-ScheduledTask -TaskName $env:OBS_NAME -Action $action -Trigger$trigger -Principal $principal -Settings$settings -Force
+                  Write-Host "Successfully registered OBS Task '$env:OBS_NAME' at$env:OBS_TIME"
               } catch {
                   Write-Warning "Failed setting up OBS Task: $($_.Exception.Message)"
               }
           }
 
-          # --- 2. Download and Schedule LOGIN Task ---
-          if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_TIME) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
-              $loginDest = Get-TargetFilePath $env:LOGIN_FILE
+          # --- 2. Download and Schedule LOGIN Task (Runs 1 min after startup) ---
+          if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
+              $loginDest = Get-TargetFilePath$env:LOGIN_FILE
 
-              Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
+              Write-Host "Downloading Login Script: $env:LOGIN_URL ->$loginDest"
               try {
-                  Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
+                  Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest$action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Once -At$dynamicLoginTime
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
-                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
+                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger$trigger -Principal $principal -Settings$settings -Force
+                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' to run at$dynamicLoginTime (1 min from now)"
               } catch {
                   Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
               }
@@ -228,16 +228,15 @@ jobs:
 
           # --- 3. Download and Schedule AHK Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {
-              $ahkDest = Get-TargetFilePath $env:AHK_FILE
+              $ahkDest = Get-TargetFilePath$env:AHK_FILE
 
-              Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
+              Write-Host "Downloading AHK Script: $env:AHK_URL ->$ahkDest"
               try {
-                  Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
-                  $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
+                  Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest$action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At$env:AHK_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
-                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at $env:AHK_TIME"
+                  Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger$trigger -Principal $principal -Settings$settings -Force
+                  Write-Host "Successfully registered AHK Task '$env:AHK_NAME' ($ahkDest) at$env:AHK_TIME"
               } catch {
                   Write-Warning "Failed setting up AHK Task: $($_.Exception.Message)"
               }
@@ -245,16 +244,15 @@ jobs:
 
           # --- 4. Download and Schedule UPLOAD Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:UPLOAD_URL) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_TIME) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_FILE) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_NAME)) {
-              $uploadDest = Get-TargetFilePath $env:UPLOAD_FILE
+              $uploadDest = Get-TargetFilePath$env:UPLOAD_FILE
 
-              Write-Host "Downloading Upload Script: $env:UPLOAD_URL -> $uploadDest"
+              Write-Host "Downloading Upload Script: $env:UPLOAD_URL ->$uploadDest"
               try {
-                  Invoke-WebRequest -Uri $env:UPLOAD_URL -OutFile $uploadDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"
-                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:UPLOAD_TIME
+                  Invoke-WebRequest -Uri $env:UPLOAD_URL -OutFile $uploadDest$action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At$env:UPLOAD_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
-                  Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
-                  Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at $env:UPLOAD_TIME"
+                  Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger$trigger -Principal $principal -Settings$settings -Force
+                  Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at$env:UPLOAD_TIME"
               } catch {
                   Write-Warning "Failed setting up Upload Task: $($_.Exception.Message)"
               }
