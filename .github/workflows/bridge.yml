@@ -74,7 +74,6 @@ jobs:
 
           sleep 5 
 
-          # Fixed redirection syntax error: /dev/null instead of /devnull 
           while kill -0 $RDP_PID 2>/dev/null; do 
             echo "[$(date)] Linux Bridge actively maintaining GUI & Audio session on $TARGET_IP..." 
             sleep 15 
