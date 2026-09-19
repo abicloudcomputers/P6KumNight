@@ -31,15 +31,15 @@ jobs:
 
           # Force Remote Desktop active display buffer
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "MaxInstanceCount" -Value 100 -Force
-          
+
           # Enable RDP Audio Redirection in Registry
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableCam" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force
-          
+
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
           if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
           Set-ItemProperty -Path $policyPath -Name "fDisableAudioCapture" -Value 0 -Type DWord -Force
-          
+
           # Enable Windows Audio Services
           Set-Service -Name "AudioSrv" -StartupType Automatic
           Start-Service -Name "AudioSrv" -ErrorAction SilentlyContinue
@@ -63,10 +63,10 @@ jobs:
               Write-Error "RDP_USER or RDP_PASSWORD secret is missing."
               exit 1
           }
-          
+
           Write-Host "::add-mask::$password"
           Write-Host "::add-mask::$userName"
-          
+
           # Disable local password complexity
           secedit /export /cfg "$env:TEMP\secpol.cfg"
           $cfgContent = Get-Content "$env:TEMP\secpol.cfg"
@@ -74,12 +74,12 @@ jobs:
           $cfgContent = $cfgContent -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0'
           $cfgContent | Out-File -Encoding ascii "$env:TEMP\secpol.cfg"
           secedit /configure /db "$env:TEMP\secpol.sdb" /cfg "$env:TEMP\secpol.cfg" /areas SECURITYPOLICY
-          
+
           # Create Account
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name $userName -Password $securePass -AccountNeverExpires -ErrorAction SilentlyContinue
           net user "$userName" "$password"
-          
+
           Add-LocalGroupMember -Group "Administrators" -Member $userName -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
 
@@ -100,12 +100,12 @@ jobs:
           $driverZip = "$env:TEMP\usbmmidd.zip"
           $driverDir = "C:\VirtualDisplay"
           New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
-          
+
           $urls = @(
               "https://raw.githubusercontent.com/roshkins/IddSampleDriver/main/usbmmidd_v2.zip",
               "https://www.amyuni.com/downloads/usbmmidd_v2.zip"
           )
-          
+
           foreach ($url in $urls) {
               try {
                   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -129,11 +129,11 @@ jobs:
               $audioZip = "$env:TEMP\VBCABLE.zip"
               $audioDir = "C:\VirtualAudio"
               New-Item -ItemType Directory -Path $audioDir -Force | Out-Null
-              
+
               $audioUrl = "https://download.vb-audio.com/Download_ZIP/VBCABLE_Driver_Pack43.zip"
               curl.exe -sSL "$audioUrl" -o "$audioZip"
               Expand-Archive -Path $audioZip -DestinationPath $audioDir -Force
-              
+
               $infPath = Join-Path $audioDir "vbcable_x64.inf"
               if (Test-Path $infPath) {
                   pnputil.exe /add-driver "$infPath" /install
@@ -149,7 +149,7 @@ jobs:
           winget install --id OBSProject.OBSStudio --exact --source winget --accept-source-agreements --accept-package-agreements
           winget install --id Zoom.Zoom -e --source winget --accept-source-agreements --accept-package-agreements
           winget install --id AutoHotkey.AutoHotkey --exact --accept-source-agreements --accept-package-agreements
-          
+
           # Install Python & required packages
           python -m pip install --upgrade pip
           pip install pynput pyautogui requests
@@ -181,13 +181,11 @@ jobs:
               return "C:\Cloud\$fileName"
           }
 
-          # Global Settings: allow running on battery, don't stop, and run as soon as possible if missed
           $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12)
 
           # --- 1. Download and Schedule OBS Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
               $obsDest = Get-TargetFilePath $env:OBS_FILE
-
               Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
               try {
                   Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
@@ -204,11 +202,26 @@ jobs:
           # --- 2. Download and Schedule LOGIN Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:LOGIN_URL) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_TIME) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_FILE) -and -not [string]::IsNullOrWhiteSpace($env:LOGIN_NAME)) {
               $loginDest = Get-TargetFilePath $env:LOGIN_FILE
-
               Write-Host "Downloading Login Script: $env:LOGIN_URL -> $loginDest"
               try {
                   Invoke-WebRequest -Uri $env:LOGIN_URL -OutFile $loginDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest                   Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force                   Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"               } catch {                   Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"               }           }            # --- 3. Download and Schedule AHK Task ---           if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {               $ahkDest = Get-TargetFilePath $env:AHK_FILE                Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"               try {                   Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest                   $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
+                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$loginDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:LOGIN_TIME
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:LOGIN_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
+                  Write-Host "Successfully registered Login Task '$env:LOGIN_NAME' at $env:LOGIN_TIME"
+              } catch {
+                  Write-Warning "Failed setting up Login Task: $($_.Exception.Message)"
+              }
+          }
+
+          # --- 3. Download and Schedule AHK Task ---
+          if (-not [string]::IsNullOrWhiteSpace($env:AHK_URL) -and -not [string]::IsNullOrWhiteSpace($env:AHK_TIME) -and -not [string]::IsNullOrWhiteSpace($env:AHK_FILE) -and -not [string]::IsNullOrWhiteSpace($env:AHK_NAME)) {
+              $ahkDest = Get-TargetFilePath $env:AHK_FILE
+              Write-Host "Downloading AHK Script: $env:AHK_URL -> $ahkDest"
+              try {
+                  Invoke-WebRequest -Uri $env:AHK_URL -OutFile $ahkDest
+                  $action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c start `"`" `"$ahkDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:AHK_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
                   Register-ScheduledTask -TaskName $env:AHK_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
@@ -221,15 +234,53 @@ jobs:
           # --- 4. Download and Schedule UPLOAD Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:UPLOAD_URL) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_TIME) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_FILE) -and -not [string]::IsNullOrWhiteSpace($env:UPLOAD_NAME)) {
               $uploadDest = Get-TargetFilePath $env:UPLOAD_FILE
-
               Write-Host "Downloading Upload Script: $env:UPLOAD_URL -> $uploadDest"
               try {
                   Invoke-WebRequest -Uri $env:UPLOAD_URL -OutFile $uploadDest
-                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:UPLOAD_TIME                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest                   Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force                   Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at $env:UPLOAD_TIME"               } catch {                   Write-Warning "Failed setting up Upload Task: $($_.Exception.Message)"               }           }        - name: Configure Direct Console Auto-Loop         run: \vert{}           $scriptContent = @'           while ($true) {               $output = qwinsta               foreach ($line in $output) {                   if ($line -match "disc\s+(\d+)") {                       $sessionId = $matches[1]                       if ($sessionId -ne "0") {                           cmd.exe /c "tscon $sessionId /dest:console" 2>$null                       }                   }               }               Start-Sleep -Seconds 5           }           '@            $scriptPath = "C:\KeepScreenAlive.ps1"           $scriptContent \vert{} Out-File -FilePath $scriptPath -Encoding utf8            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File $scriptPath"           $trigger = New-ScheduledTaskTrigger -AtStartup           $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest                      Register-ScheduledTask -TaskName "KeepScreenAliveTask" -Action $action -Trigger $trigger -Principal $principal -Force           Start-ScheduledTask -TaskName "KeepScreenAliveTask"        - name: Install & Connect Tailscale         run: \vert{}           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"           $installerPath = "$env:TEMP\tailscale.msi"                      curl.exe -sSL "$tsUrl" -o "$installerPath"            $process = Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/qn", "/norestart" -Wait -PassThru
+                  $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$uploadDest`"" -WorkingDirectory "C:\Cloud"
+                  $trigger = New-ScheduledTaskTrigger -Daily -At $env:UPLOAD_TIME
+                  $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
+                  Register-ScheduledTask -TaskName $env:UPLOAD_NAME -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force
+                  Write-Host "Successfully registered Upload Task '$env:UPLOAD_NAME' at $env:UPLOAD_TIME"
+              } catch {
+                  Write-Warning "Failed setting up Upload Task: $($_.Exception.Message)"
+              }
+          }
+
+      - name: Configure Direct Console Auto-Loop
+        run: |
+          $scriptContent = @'
+          while ($true) {
+              $output = qwinsta
+              foreach ($line in $output) {
+                  if ($line -match "disc\s+(\d+)") {
+                      $sessionId = $matches[1]
+                      if ($sessionId -ne "0") {
+                          cmd.exe /c "tscon $sessionId /dest:console" 2>$null
+                      }
+                  }
+              }
+              Start-Sleep -Seconds 5
+          }
+          '@
+          $scriptPath = "C:\KeepScreenAlive.ps1"
+          $scriptContent | Out-File -FilePath $scriptPath -Encoding utf8
+          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File $scriptPath"
+          $trigger = New-ScheduledTaskTrigger -AtStartup
+          $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+          Register-ScheduledTask -TaskName "KeepScreenAliveTask" -Action $action -Trigger $trigger -Principal $principal -Force
+          Start-ScheduledTask -TaskName "KeepScreenAliveTask"
+
+      - name: Install & Connect Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          curl.exe -sSL "$tsUrl" -o "$installerPath"
+          $process = Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/qn", "/norestart" -Wait -PassThru
           Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
 
           $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          
+
           $timeout = 0
           while (-not (Test-Path $tsExe) -and $timeout -lt 30) {
               Start-Sleep -Seconds 2
