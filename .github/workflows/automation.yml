@@ -37,7 +37,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force
           
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
-          if (-not (Test-Path $policyPath)) { New-Item -Path$policyPath -Force | Out-Null }
+          if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
           Set-ItemProperty -Path $policyPath -Name "fDisableAudioCapture" -Value 0 -Type DWord -Force
           
           # Enable Windows Audio Services
@@ -70,24 +70,25 @@ jobs:
           # Disable local password complexity
           secedit /export /cfg "$env:TEMP\secpol.cfg"
           $cfgContent = Get-Content "$env:TEMP\secpol.cfg"
-          $cfgContent = $cfgContent -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0'$cfgContent = $cfgContent -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0'$cfgContent | Out-File -Encoding ascii "$env:TEMP\secpol.cfg"
+          $cfgContent = $cfgContent -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0'
+          $cfgContent = $cfgContent -replace 'MinimumPasswordLength = \d+', 'MinimumPasswordLength = 0'
+          $cfgContent | Out-File -Encoding ascii "$env:TEMP\secpol.cfg"
           secedit /configure /db "$env:TEMP\secpol.sdb" /cfg "$env:TEMP\secpol.cfg" /areas SECURITYPOLICY
           
           # Create Account
-          $securePass = ConvertTo-SecureString$password -AsPlainText -Force
-          New-LocalUser -Name $userName -Password$securePass -AccountNeverExpires -ErrorAction SilentlyContinue
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name $userName -Password $securePass -AccountNeverExpires -ErrorAction SilentlyContinue
           net user "$userName" "$password"
-          
           Add-LocalGroupMember -Group "Administrators" -Member $userName -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName -ErrorAction SilentlyContinue
 
           # Infinite session duration & disable lock screen
           $policyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsPersonalization'
-          if (-not (Test-Path $policyPath)) { New-Item -Path$policyPath -Force | Out-Null }
+          if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
           Set-ItemProperty -Path $policyPath -Name "NoLockScreen" -Value 1 -Type DWord -Force
 
           $tsPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
-          if (-not (Test-Path $tsPath)) { New-Item -Path$tsPath -Force | Out-Null }
+          if (-not (Test-Path $tsPath)) { New-Item -Path $tsPath -Force | Out-Null }
           Set-ItemProperty -Path $tsPath -Name "MaxIdleTime" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $tsPath -Name "MaxDisconnectionTime" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $tsPath -Name "RemoteAppLogoffTimeout" -Value 0 -Type DWord -Force
@@ -97,22 +98,23 @@ jobs:
           # --- 1. Install Virtual Display Driver ---
           $driverZip = "$env:TEMP\usbmmidd.zip"
           $driverDir = "C:\VirtualDisplay"
-          New-Item -ItemType Directory -Path $driverDir -Force \vert{} Out-Null$urls = @(
+          New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
+          $urls = @(
               "https://raw.githubusercontent.com/roshkins/IddSampleDriver/main/usbmmidd_v2.zip",
               "https://www.amyuni.com/downloads/usbmmidd_v2.zip"
           )
           
-          foreach ($url in$urls) {
+          foreach ($url in $urls) {
               try {
                   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
                   curl.exe -sSL "$url" -o "$driverZip"
-                  if ((Test-Path $driverZip) -and (Get-Item$driverZip).Length -gt 1000) { break }
+                  if ((Test-Path $driverZip) -and (Get-Item $driverZip).Length -gt 1000) { break }
               } catch {}
           }
 
           if (Test-Path $driverZip) {
-              Expand-Archive -Path $driverZip -DestinationPath$driverDir -Force
-              $installer = Get-ChildItem -Path$driverDir -Recurse -Filter "deviceinstaller64.exe" | Select-Object -First 1
+              Expand-Archive -Path $driverZip -DestinationPath $driverDir -Force
+              $installer = Get-ChildItem -Path $driverDir -Recurse -Filter "deviceinstaller64.exe" | Select-Object -First 1
               if ($installer) {
                   Set-Location $installer.DirectoryName
                   & .\deviceinstaller64.exe install usbmmidd.inf usbmmidd
@@ -124,11 +126,12 @@ jobs:
           try {
               $audioZip = "$env:TEMP\VBCABLE.zip"
               $audioDir = "C:\VirtualAudio"
-              New-Item -ItemType Directory -Path $audioDir -Force \vert{} Out-Null$audioUrl = "https://download.vb-audio.com/Download_ZIP/VBCABLE_Driver_Pack43.zip"
+              New-Item -ItemType Directory -Path $audioDir -Force | Out-Null
+              $audioUrl = "https://download.vb-audio.com/Download_ZIP/VBCABLE_Driver_Pack43.zip"
               curl.exe -sSL "$audioUrl" -o "$audioZip"
-              Expand-Archive -Path $audioZip -DestinationPath$audioDir -Force
+              Expand-Archive -Path $audioZip -DestinationPath $audioDir -Force
               
-              $infPath = Join-Path$audioDir "vbcable_x64.inf"
+              $infPath = Join-Path $audioDir "vbcable_x64.inf"
               if (Test-Path $infPath) {
                   pnputil.exe /add-driver "$infPath" /install
                   Write-Host "Virtual Audio Driver installed via pnputil without hanging."
@@ -180,11 +183,11 @@ jobs:
 
           # --- 1. Download and Schedule OBS Task ---
           if (-not [string]::IsNullOrWhiteSpace($env:OBS_URL) -and -not [string]::IsNullOrWhiteSpace($env:OBS_TIME) -and -not [string]::IsNullOrWhiteSpace($env:OBS_FILE) -and -not [string]::IsNullOrWhiteSpace($env:OBS_NAME)) {
-              $obsDest = Get-TargetFilePath$env:OBS_FILE
+              $obsDest = Get-TargetFilePath $env:OBS_FILE
 
-              Write-Host "Downloading OBS Script: $env:OBS_URL ->$obsDest"
+              Write-Host "Downloading OBS Script: $env:OBS_URL -> $obsDest"
               try {
-                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile$obsDest
+                  Invoke-WebRequest -Uri $env:OBS_URL -OutFile $obsDest
                   $action  = New-ScheduledTaskAction -Execute "python" -Argument "`"$obsDest`"" -WorkingDirectory "C:\Cloud"
                   $trigger = New-ScheduledTaskTrigger -Daily -At $env:OBS_TIME
                   $principal = New-ScheduledTaskPrincipal -UserId "$env:RDP_USER" -LogonType Interactive -RunLevel Highest
