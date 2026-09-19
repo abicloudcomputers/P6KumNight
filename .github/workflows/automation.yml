@@ -350,13 +350,14 @@ jobs:
             -d "$payload"
 
           # Run loop for 3 hours (10800 seconds), then complete cleanly
-          $totalSeconds = 10800$elapsedSeconds = 0
-
-          while ($elapsedSeconds -lt$totalSeconds) {
+          $totalSeconds = 10800
+          $elapsedSeconds = 0
+          
+          while ($elapsedSeconds -lt $totalSeconds) {
               Write-Host "[$(Get-Date)] RDP & Virtual Engine Active ($elapsedSeconds / $totalSeconds seconds)..."
               Start-Sleep -Seconds 300
               $elapsedSeconds += 300
           }
-
+          
           Write-Host "Execution time limit of 3 hours reached. Completing workflow successfully."
           exit 0
